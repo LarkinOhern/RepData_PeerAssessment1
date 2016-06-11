@@ -1,0 +1,175 @@
+---
+title: "Activity Monitor Analysis: Counting Steps"
+author: "Larkin O'Hern"
+date: "June 10, 2016"
+output: html_document
+---
+1. First we need to load the activity monitoring data.  The data file is available here:https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip.  The version we'll use was downloaded at 19:29 31 MAY 16. 
+
+```{r}
+
+amd<-read.csv("C:/Users/Larkin/Documents/Coursera Work/Reproducible Research/activity/activity.csv")
+```
+
+
+Now we need to get the dates and times in an easier format to manipulate.
+
+```{r}
+amd$date<-as.Date(amd$date, "%Y-%m-%d")
+
+
+```
+
+Now let's answer some questions: What is the mean total number of steps taken per day?
+
+Aggregate the data by day:
+
+```{r}
+daily_steps<-aggregate(amd$steps, by = list(amd$date), sum)
+names(daily_steps)<-c("Date","Total_Steps")
+daily_steps
+
+```
+
+
+2. Plot a histogram of total steps by day:
+
+```{r}
+hist(daily_steps$Total_Steps, col ="blue", main = "Histogram of Steps per Day", xlab="Steps Per Day", breaks = 10)
+
+```
+
+3. Calculate the mean and median:
+```{r}
+mean.raw<-mean(daily_steps$Total_Steps, na.rm = T)
+
+median.raw<-median(daily_steps$Total_Steps, na.rm = T)
+
+mean.raw
+median.raw
+```
+
+4. Find the daily activity pattern:
+
+First lets plot out the average number of steps in each five minute interval to get a sense for the activity pattern.
+
+```{r}
+ai<-aggregate(amd$steps, by=list(amd$interval), mean, na.rm=TRUE)
+names(ai)<-c("Interval","Average.Steps")
+
+plot(ai$Interval,ai$Average.Steps,type = "l", xlab = "Interval",ylab = "Steps", main="Average Number of Steps in each Interval")
+
+```
+
+5. Then, lets find the interval with the highest average step count.
+
+```{r}
+maxi<-which.max(ai$Average.Steps)
+
+ai[maxi,]
+
+
+```
+So the inteveral with the highest average step count (206.1) is 835.
+
+6.Impute missing values:
+
+First we need to find the total number of rows with missing values:
+
+```{r}
+sum(is.na(amd$steps))
+    
+```
+
+So there are 2304 rows with missing values.  Lets see what percentage of the dat set that is:
+```{r}
+mean(is.na(amd$steps))
+```
+
+13% is kind of a lot-we'll impute (estimate) those values now.
+
+6. As a rough estimate we'll assign each mising interval the mean for that 5 minute  interval across all days. To do this
+we'll us plyr to create a new dataset amdi with imputed values in place of NAs. We'll check that the NAs have been replaced 
+using is.na .
+```{r}
+library(plyr)
+impute.mean<-function(x) replace(x, is.na(x), (mean(x, na.rm=TRUE)))
+
+amdi<-ddply(amd, ~interval, transform, steps=impute.mean(steps))
+
+sum(is.na(amdi))
+```
+
+
+```{r}
+
+
+dayavgi<-aggregate(amdi$steps, by=list(amdi$date), sum)
+
+names(dayavgi)<-c("Date","Total.Steps")
+```
+
+7. Let's take a look with a histogram:
+
+```{r}
+par(mfrow=c(1,2))
+
+hist(daily_steps$Total_Steps, col ="blue", main = "Steps per Day-NAs", xlab="Steps Per Day", breaks = 10)
+
+abline(v=mean(daily_steps$Total_Steps))
+
+
+hist(dayavgi$Total.Steps, xlab="Daily Total Steps", main="Steps Per Day-Imputed", col="red", breaks=10)
+
+abline(v=mean(daily_steps$Total_Steps, na.rm = T))
+
+```
+
+8. Now let's find the new mean and median using the imputed data and compare it to the orginal mean and median:
+
+```{r}
+mean.imputed<-mean(dayavgi$Total.Steps)
+
+median.imputed<-median(dayavgi$Total.Steps)
+
+mean.imputed
+mean.raw
+
+median.imputed
+median.raw
+
+```
+
+For both the mean and the median the imputed values are higher than the values in the data set with the missing values.  By comparing the histograms of the raw and imputed data we see that the requecy of days with very few steps per dat drops dramatically.  This could be an indication that some days with few steps actually had many missing values decreasing their total.  When the interval means are imputed the total steps on those days naturally rise.  We also see an increase in the frequecy of step counts near the mean which makes since given that by adding the average interval count in place of mising values we make all days more similar to the mean.   
+
+We can test this by checking the distribution of NAs across each day and plotting the result.
+```{r}
+library(ggplot2)
+count_nas<-function(x) {return(sum(is.na(x)))}
+
+na.by.day<-aggregate(amd$steps, list(amd$date), FUN = count_nas)
+
+names(na.by.day)<-c("Date","Total.Missing")
+
+qplot(na.by.day$Date, na.by.day$Total.Missing)
+
+```
+
+
+The NAs are highly concentrated in just 8 days-so adding in the means makes a big difference for those days.  
+
+Now let's see if there are differences between weekdays and weekends:
+
+```{r}
+wkday<-function(x) if (x %in% c("Saturday","Sunday")) {return("Weekend")} else {return("Weekday")}
+amdi$day.of.week<-weekdays(amdi$date)
+amdi$wk<-factor(sapply(amdi$day.of.week, wkday))
+
+avg.steps.by.wk<-aggregate(amdi$steps, by=list(amdi$interval, amdi$wk), mean)
+
+names(avg.steps.by.wk)<-c("Interval","Wk","Steps")
+
+g<-ggplot(avg.steps.by.wk, aes(x=Interval, y=Steps,))
+
+g+geom_line()+facet_grid(Wk~.)
+
